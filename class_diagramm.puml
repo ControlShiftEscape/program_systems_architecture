@@ -1,0 +1,93 @@
+@startuml
+skinparam classAttributeIconSize 0
+skinparam monochrome true
+
+class SimulationEngine {
+  - eventQueue: PriorityQueue<Event>
+  - currentTime: double
+  - sources: List<Source>
+  - devices: List<Device>
+  - buffer: RingBuffer
+  - dp: DispatcherPlacement
+  - dv: DispatcherSelection
+  
+  + runSimulation()
+  + processNextEvent()
+  + getStatistics(): Map
+}
+
+class Source {
+  - id: int
+  - lambda: double ' Параметр для ИЗ1
+  - nextGenerationTime: double
+  
+  + generateRequest(): Request ' Генерация по ИЗ1
+  + scheduleNextRequest()
+}
+
+class Request {
+  - id: int
+  - sourceId: int
+  - generationTime: double
+  - arrivalTime: double
+  
+  + getAge(currentTime): double
+}
+
+note right of Request
+
+end note
+
+class RingBuffer {
+  - capacity: int
+  - slots: List<Request>
+  - writePointer: int ' Для Д10З1
+  - readPointer: int ' Для Д2Б3
+  - count: int
+  
+  + isFull(): boolean
+  + isEmpty(): boolean
+  + writeRequest(req: Request): Request ' Возвращает отказанную заявку
+  + findOldestRequest(): Request ' Логика Д10О3
+  + readNextRequest(): Request ' Логика Д2Б3
+}
+
+class DispatcherPlacement {
+  - buffer: RingBuffer ' Ссылка на буфер
+  - devices: List<Device> ' Ссылка на приборы
+  
+  + handleNewRequest(req: Request) 'Реакция на триггер: пришла заявка
+  - findFreeDevice(): Device ' Логика Д2П1
+}
+
+class DispatcherSelection {
+  - buffer: RingBuffer ' Ссылка на буфер
+  - devices: List<Device> ' Ссылка на приборы
+  
+  + handleDeviceFree(device: Device) ' Реакция на триггер: прибор освободился
+  - selectNextRequest(): Request ' Логика Д2Б3
+  - assignToDevice(req: Request, device: Device)
+}
+
+class Device {
+  - id: int ' Для Д2П1
+  - mu: double ' Параметр для ПЗ1
+  - isBusy: boolean
+  - currentRequest: Request
+  
+  + startProcessing(req: Request) ' Обслуживание по ПЗ1
+  + finishProcessing(): Request
+}
+
+SimulationEngine "1" *-- "*" Source
+SimulationEngine "1" *-- "*" Device
+SimulationEngine "1" *-- "1" RingBuffer
+SimulationEngine "1" *-- "1" DispatcherPlacement
+SimulationEngine "1" *-- "1" DispatcherSelection
+
+DispatcherPlacement --> RingBuffer : использует
+DispatcherPlacement --> Device : назначает
+DispatcherSelection --> RingBuffer : забирает
+DispatcherSelection --> Device : назначает
+
+@enduml
