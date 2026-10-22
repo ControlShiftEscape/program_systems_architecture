@@ -9,37 +9,48 @@ participant "Кольцевой Буфер\n(Ring Buffer)" as Buffer
 participant "Диспетчер Выбора (ДВ)" as DV
 participant "Прибор (Device)" as Device
 
-== Триггер №1: Появление новой заявки ==
-Engine -> DP: Триггер: Сгенерирована новая заявка\n(Закон **ИЗ1**: Пуассоновский поток)
+== Событие №1: Поступление заявки (ARRIVAL) ==
+Engine -> DP: Триггер: Сгенерирована новая заявка\n(Закон **ИЗ1**)
 activate DP
 
 DP -> Device: Поиск свободного прибора\n(Закон **Д2П1**: перебор с П1)
 activate Device
-Device --> DP: Ответ: Все приборы заняты
-deactivate Device
+Device --> DP: Ответ: Статус прибора
 
-DP -> Buffer: Попытка записи заявки\n(Закон **Д10З1**: по указателю writePtr)
-activate Buffer
-Buffer --> DP: Ответ: Буфер полон (count == capacity)
-
-note right of Buffer
-  Срабатывает дисциплина **Д10О3**
-  (Отказ самой старой в буфере)
-end note
-
-DP -> Buffer: Найти заявку с минимальным\nвременем генерации (самую старую)
-Buffer --> DP: Ответ: Найдена заявка Old (t=10)
-
-DP -> Buffer: Удалить заявку Old (Отказ)
-Buffer --> DP: Ответ: Удалено
-
-DP -> Buffer: Записать новую заявку\nна место Old (writePtr сдвигается)
-Buffer --> DP: Ответ: Успешно записано
-deactivate Buffer
+alt Прибор свободен (HappyFlow)
+    DP -> Device: Назначить заявку сразу на П1
+    Device --> DP: Ответ: Принято
+    Device -> Device: Начало обслуживания (**ПЗ1**)
+    deactivate Device
+    
+else Все приборы заняты (Идем в буфер)
+    deactivate Device
+    
+    DP -> Buffer: Попытка записи заявки\n(Закон **Д10З1**: по указателю writePtr)
+    activate Buffer
+    Buffer --> DP: Ответ: Статус буфера
+    
+    alt Буфер полон (Срабатывает **Д10О3**)
+        note right of Buffer
+          Отказ самой старой в буфере
+        end note
+        DP -> Buffer: Найти заявку с минимальным\nвременем генерации
+        Buffer --> DP: Ответ: Найдена заявка Old
+        DP -> Buffer: Удалить заявку Old (Отказ)
+        Buffer --> DP: Ответ: Удалено
+        DP -> Buffer: Записать новую заявку
+        Buffer --> DP: Ответ: Успешно записано
+        
+    else В буфере есть свободное место
+        DP -> Buffer: Записать новую заявку\n(writePtr сдвигается)
+        Buffer --> DP: Ответ: Успешно записано
+    end
+    deactivate Buffer
+end
 deactivate DP
 
-== Триггер №2: Освобождение прибора ==
-Engine -> Device: Триггер: Завершение обработки\n(Закон **ПЗ1**: Экспоненциальный)
+== Событие №2: Освобождение прибора (SERVICE_END) ==
+Engine -> Device: Триггер: Завершение обработки\n(Закон **ПЗ1**)
 activate Device
 Device -> DV: Сигнал: Прибор П1 освободился
 deactivate Device
@@ -47,26 +58,15 @@ deactivate Device
 activate DV
 DV -> Buffer: Запрос следующей заявки\n(Закон **Д2Б3**: с readPtr по кольцу)
 activate Buffer
-Buffer --> DV: Ответ: Возврат заявки Next\n(readPtr сдвигается)
+Buffer --> DV: Ответ: Возврат заявки Next
 deactivate Buffer
 
-DV -> Device: Назначить заявку Next на П1\n(Закон **Д2П1**: приоритет П1)
+DV -> Device: Назначить заявку Next на П1\n(Закон **Д2П1**)
 activate Device
-Device --> DV: Ответ: Принято в обработку
+Device --> DV: Ответ: Принято
 deactivate DV
 
 Device -> Device: Начало обслуживания\n(Генерация времени по **ПЗ1**)
-deactivate Device
-
-== Альтернатива: HappyFlow (Прибор был свободен сразу) ==
-Engine -> DP: Триггер: Сгенерирована новая заявка (**ИЗ1**)
-activate DP
-DP -> Device: Поиск свободного прибора (**Д2П1**)
-activate Device
-Device --> DP: Ответ: Прибор П1 свободен
-DP -> Device: Назначить заявку сразу на П1
-Device --> DP: Ответ: Принято
-deactivate DP
 deactivate Device
 
 @enduml
