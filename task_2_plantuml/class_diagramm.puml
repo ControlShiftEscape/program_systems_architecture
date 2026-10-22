@@ -9,7 +9,7 @@ interface RequestHandler {
 interface Payload {
   + getPlayerId(): int
   + getTimestamp(): double
-  + getMetrics(): Map
+  + getMetrics(): Map<String, double>
 }
 
 enum PlayerStatus {
@@ -54,9 +54,9 @@ class Logger {
 
 class Log {
   - date: double
-  - logContent: string
+  - logContent: String
   
-  + getLogContent(): List<string>
+  + getLogContent(): String
   + getLogDate(): double
 }
 
@@ -68,6 +68,7 @@ Source --> Logger : логирует генерацию
 Device --> Logger : логирует обслуживание
 DispatcherPlacement --> Logger : логирует отказы
 DispatcherSelection --> Logger : логирует выборку
+EventScheduler --> Logger : логирует планирование
 
 TelemetryData --> Point3D : содержит
 TelemetryData --> Vector3D : содержит
@@ -104,6 +105,8 @@ Event <|-- ArrivalEvent
 Event <|-- ServiceEndEvent
 Event <|-- ScheduleNextEvent
 
+Event ..> SimulationEngine : использует
+
 note top of Event
 Виртуальная база для всех видов событий
 end note
@@ -128,7 +131,7 @@ end note
 
 class SimulationEngine {
   - scheduler: EventScheduler
-  - reqestHanlder: RequestHandler
+  - requestHandler: RequestHandler
 
   - dp: DispatcherPlacement
   - dv: DispatcherSelection
@@ -141,13 +144,13 @@ class SimulationEngine {
   - const MAX_SIM_TIME: double
 
   - processNextEvent()
-  - getStatistics(): Map
+  - getStatistics(): Map<String, double>
   + runSimulation()
 }
 
 class Source {
   - scheduler: EventScheduler
-  - logger Logger
+  - logger: Logger
 
   - id: int
   - lambda: double ' Параметр для ИЗ1
@@ -165,7 +168,7 @@ class Request {
   
   + operator<(other: Request): boolean
   + getAge(currentTime): double
-  + getPayload(): TelemetryData
+  + getPayload(): Payload
 }
 
 note left of Request
@@ -186,7 +189,7 @@ class TelemetryData {
   
   + getPlayerId(): int
   + getTimestamp(): double
-  + getMetrics(): Map
+  + getMetrics(): Map<String, double>
 }
 
 TelemetryData ..|> Payload : реализует
@@ -220,7 +223,7 @@ class PlayerProfile {
 }
 
 class PlayerProfileStore {
- - profiles: Map  ' Map<int, PlayerProfile> 
+ - profiles: Map<int, PlayerProfile>  ' Map<int, PlayerProfile> 
   
   + getOrCreateProfile(playerId: int): PlayerProfile
   + processResult(result: AnalysisResult)
@@ -250,7 +253,7 @@ end note
 
 class DispatcherPlacement {
   - scheduler: EventScheduler
-  - logger Logger
+  - logger: Logger
 
   - buffer: RingBuffer ' Ссылка на буфер
   - devices: List<Device> ' Ссылка на приборы
@@ -261,7 +264,7 @@ class DispatcherPlacement {
 
 class DispatcherSelection {
   - scheduler: EventScheduler
-  - logger Logger
+  - logger: Logger
 
   - buffer: RingBuffer ' Ссылка на буфер
   - devices: List<Device> ' Ссылка на приборы
@@ -275,11 +278,13 @@ class Device {
   - currentRequest: Request
   - scheduler: EventScheduler
   - handler: RequestHandler
-  - logger Logger
+  - logger: Logger
 
   - id: int ' Для Д2П1
   - mu: double ' Параметр для ПЗ1
   - isBusy: boolean
+  - serviceStartTime: double
+  - busyTime: double
 
   - generateServiceTime(): double
   + start(req: Request, now: double): double
@@ -311,7 +316,7 @@ end note
 
 class EventScheduler {
   - eventQueue: PriorityQueue<Event>
-  - logger Logger
+  - logger: Logger
 
   + schedule(event: Event)
   + getNextEvent(): Event
@@ -323,6 +328,12 @@ SimulationEngine "1" *-- "*" Device
 SimulationEngine "1" *-- "1" RingBuffer
 SimulationEngine "1" *-- "1" DispatcherPlacement
 SimulationEngine "1" *-- "1" DispatcherSelection
+SimulationEngine "1" *-- "1" EventScheduler : processNextEvent берёт события через getNextEvent()
+SimulationEngine --> RequestHandler : использует
+
+Source --> EventScheduler : планирует следующую генерацию
+DispatcherPlacement --> EventScheduler : планирует
+DispatcherSelection --> EventScheduler : планирует
 
 DispatcherPlacement --> RingBuffer : использует
 DispatcherPlacement --> Device : назначает
@@ -333,7 +344,7 @@ DispatcherSelection --> Device : назначает
 TelemetryAnalyzer ..> AnalysisResult : возвращает
 PlayerProfileStore "1" *-- "*" PlayerProfile : хранит
 PlayerProfileStore --> AnalysisResult : принимает
-Request --> TelemetryData : содержит payload
+Request --> Payload : содержит payload
 
 AntiCheatHandler ..|> RequestHandler : реализует
 AntiCheatHandler --> TelemetryAnalyzer : использует
