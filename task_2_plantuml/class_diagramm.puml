@@ -30,13 +30,74 @@ class Request {
   - sourceId: int
   - generationTime: double
   - arrivalTime: double
+  - payload: TelemetryData ' 
   
   + getAge(currentTime): double
+  + getPayload(): TelemetryData
 }
 
-note right of Request
+note left of Request
+Основная структура-обертка, которая 
+будет проходить цикл обработки
+end note
+
+class TelemetryData {
+  - playerId: int
+  - tickTimestamp: double          ' Время начала этого 100мс тика
+  
+  ' Движение (Массив сэмплов за период)
+  - positionSamples: List<Point3D> ' Массив позиций за последние N кадров
+  - movementVectors: List<Vector3D>' Массив векторов скорости за период
+  
+  ' Агрегированные метрики (вычисляются на клиенте для экономии трафика)
+  - maxSpeed100ms: double          ' Максимальная скорость за тик
+  - aimJitterScore: double         ' Оценка "дрожания" прицела за период (0-1)
+}
+
+note right of TelemetryData
 
 end note
+
+class TelemetryAnalyzer {
+  - threshold: double
+  + analyze(data: TelemetryData): AnalysisResult
+}
+
+class AnalysisResult {
+  - playerId: int
+  - suspicionScore: double ' От 0.0 до 1.0 (насколько тик был подозрителен)
+  - reason: String
+  - timestamp: double
+}
+note right of AnalysisResult
+
+end note
+
+class PlayerProfile {
+  - playerId: int
+  - playerStatus : PlayerStatus
+  - sessionStartTime: double
+  - currentSuspicionScore: double ' Накопленный счетчик
+  - banThreshold: double ' Порог для бана (например, 0.95)
+  - warningThreshold: double ' Порог для варна/мутa
+  
+  + addResult(result: AnalysisResult)
+  + decayScore(timePassed: double) ' Старые подозрения со временем затухают
+  + getStatus(): PlayerStatus ' NORMAL, WARNING, BANNED
+}
+
+class PlayerProfileStore {
+  - profiles: Map<int, PlayerProfile> ' База всех игроков в сессии
+  
+  + getOrCreateProfile(playerId: int): PlayerProfile
+  + processResult(result: AnalysisResult)
+}
+
+TelemetryAnalyzer ..> AnalysisResult : возвращает
+PlayerProfileStore "1" *-- "*" PlayerProfile : хранит
+PlayerProfileStore --> AnalysisResult : принимает
+
+
 
 class RingBuffer {
   - capacity: int
