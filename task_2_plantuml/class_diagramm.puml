@@ -2,6 +2,77 @@
 skinparam classAttributeIconSize 0
 skinparam monochrome true
 
+interface RequestHandler {
+  + onServed(req: Request, finishTime: double)
+}
+
+interface Payload {
+  + getPlayerId(): int
+  + getTimestamp(): double
+  + getMetrics(): Map
+}
+
+enum PlayerStatus {
+  NORMAL
+  WARNING
+  BANNED
+}
+
+class Point3D {
+  - x: double
+  - y: double
+  - z: double
+}
+
+class Vector3D {
+  - x: double
+  - y: double
+  - z: double
+}
+
+enum LogType {
+  EVENT
+  GENERATION
+  BUFFER_WRITE
+  BUFFER_READ
+  REJECTION
+  SERVICE_START
+  SERVICE_END
+  STATE
+  STATISTICS
+}
+
+class Logger {
+  - logs: Map<LogType, List<Log>>
+  
+  + log(type: LogType, log: Log)
+  + getLogs(type: LogType): List<Log>
+  + clear()
+  + printAll()
+  - toString(type: LogType): String
+}
+
+class Log {
+  - date: double
+  - logContent: string
+  
+  + getLogContent(): List<string>
+  + getLogDate(): double
+}
+
+Logger --> LogType : использует
+Logger --> Log : использует
+
+SimulationEngine --> Logger : логирует события
+Source --> Logger : логирует генерацию
+Device --> Logger : логирует обслуживание
+DispatcherPlacement --> Logger : логирует отказы
+DispatcherSelection --> Logger : логирует выборку
+
+TelemetryData --> Point3D : содержит
+TelemetryData --> Vector3D : содержит
+PlayerProfile --> PlayerStatus : использует
+
 ' === БЛОК СОБЫТИЙ (ПОЛИМОРФИЗМ) ===
 rectangle "События системы" #FFEBEE {
     class Event {
@@ -33,6 +104,9 @@ Event <|-- ArrivalEvent
 Event <|-- ServiceEndEvent
 Event <|-- ScheduleNextEvent
 
+note top of Event
+Виртуальная база для всех видов событий
+end note
 
 note bottom of ArrivalEvent
   **Архитектурный триггер**
@@ -53,7 +127,8 @@ note bottom of ScheduleNextEvent
 end note
 
 class SimulationEngine {
-  - eventQueue: PriorityQueue<Event>
+  - scheduler: EventScheduler
+  - reqestHanlder: RequestHandler
 
   - dp: DispatcherPlacement
   - dv: DispatcherSelection
@@ -66,17 +141,19 @@ class SimulationEngine {
   - const MAX_SIM_TIME: double
 
   - processNextEvent()
-  - getStatistics(PlayerProfileStore storage): Map
+  - getStatistics(): Map
   + runSimulation()
 }
 
 class Source {
+  - scheduler: EventScheduler
+  - logger Logger
+
   - id: int
   - lambda: double ' Параметр для ИЗ1
-  - nextGenerationTime: double
   
   + generateRequest(): Request ' Генерация по ИЗ1
-  + scheduleNextRequest()
+  + scheduleNextRequest(): double ' просто время след. запуска
 }
 
 class Request {
@@ -84,8 +161,9 @@ class Request {
   - sourceId: int
   - generationTime: double
   - arrivalTime: double
-  - payload: TelemetryData ' 
+  - payload: Payload 
   
+  + operator<(other: Request): boolean
   + getAge(currentTime): double
   + getPayload(): TelemetryData
 }
@@ -93,24 +171,25 @@ class Request {
 note left of Request
 Основная структура-обертка, которая 
 будет проходить цикл обработки
+Реализует оператор <
+по generationTime
+для использования в RingBuffer<Request>
 end note
 
 class TelemetryData {
   - playerId: int
-  - tickTimestamp: double          ' Время начала этого 100мс тика
+  - tickTimestamp: double
+  - positionSamples: List<Point3D>
+  - movementVectors: List<Vector3D>
+  - maxSpeed100ms: double
+  - aimJitterScore: double
   
-  ' Движение (Массив сэмплов за период)
-  - positionSamples: List<Point3D> ' Массив позиций за последние N кадров
-  - movementVectors: List<Vector3D>' Массив векторов скорости за период
-  
-  ' Агрегированные метрики (вычисляются на клиенте для экономии трафика)
-  - maxSpeed100ms: double          ' Максимальная скорость за тик
-  - aimJitterScore: double         ' Оценка "дрожания" прицела за период (0-1)
+  + getPlayerId(): int
+  + getTimestamp(): double
+  + getMetrics(): Map
 }
 
-note right of TelemetryData
-
-end note
+TelemetryData ..|> Payload : реализует
 
 class TelemetryAnalyzer {
   - threshold: double
@@ -152,18 +231,27 @@ class PlayerProfileStore {
 class RingBuffer {
   - capacity: int
   - slots: List<Request>
-  - writePointer: int ' Для Д10З1
-  - readPointer: int ' Для Д2Б3
+  - writePointer: int
+  - readPointer: int
   - count: int
   
   + isFull(): boolean
   + isEmpty(): boolean
-  + writeRequest(req: Request): Request ' Возвращает отказанную заявку
-  + findOldestRequest(): Request ' Логика Д10О3
-  + readNextRequest(): Request ' Логика Д2Б3
+  + write(req: Request): Request
+  + readNext(): Request
+  + findOldest(): Request
 }
 
+note right of RingBuffer
+  Хранит заявки в кольцевом буфере.
+  findOldest() ищет заявку с минимальным
+  generationTime для реализации Д10О3
+end note
+
 class DispatcherPlacement {
+  - scheduler: EventScheduler
+  - logger Logger
+
   - buffer: RingBuffer ' Ссылка на буфер
   - devices: List<Device> ' Ссылка на приборы
   
@@ -172,6 +260,9 @@ class DispatcherPlacement {
 }
 
 class DispatcherSelection {
+  - scheduler: EventScheduler
+  - logger Logger
+
   - buffer: RingBuffer ' Ссылка на буфер
   - devices: List<Device> ' Ссылка на приборы
   
@@ -181,15 +272,50 @@ class DispatcherSelection {
 }
 
 class Device {
+  - currentRequest: Request
+  - scheduler: EventScheduler
+  - handler: RequestHandler
+  - logger Logger
+
   - id: int ' Для Д2П1
   - mu: double ' Параметр для ПЗ1
   - isBusy: boolean
-  - currentRequest: Request
+
+  - generateServiceTime(): double
+  + start(req: Request, now: double): double
+  + finish(now: double): Request
+  + isFree(): boolean
+  + getBusyTime(): double
+  
+}
+note left of Device
+  Обращается к обработчику реквестов
+  Использует свои вычислительные мощности для исполнения
+  анализа через анализатор обработчика и сохранения в
+  хранилище обработчика
+end note
+
+Device --> EventScheduler : планирует SERVICE_END
+Device --> RequestHandler : уведомляет об окончании
+
+class AntiCheatHandler {
   - analyzer: TelemetryAnalyzer
   - resultStore: PlayerProfileStore
   
-  + process(req: Request) ' Обслуживание по ПЗ1
-  + isFree()
+  + onServed(req: Request, finishTime: double)
+}
+note top of AntiCheatHandler
+  Описывает кто анализирует реквесты
+  Описывает куда складывать результаты анализа реквестов
+end note
+
+class EventScheduler {
+  - eventQueue: PriorityQueue<Event>
+  - logger Logger
+
+  + schedule(event: Event)
+  + getNextEvent(): Event
+  + isEmpty(): boolean
 }
 
 SimulationEngine "1" *-- "*" Source
@@ -203,11 +329,14 @@ DispatcherPlacement --> Device : назначает
 DispatcherSelection --> RingBuffer : забирает
 DispatcherSelection --> Device : назначает
 
-Device --> TelemetryAnalyzer : использует для анализа
-Device --> PlayerProfileStore : отправляет результат
+
 TelemetryAnalyzer ..> AnalysisResult : возвращает
 PlayerProfileStore "1" *-- "*" PlayerProfile : хранит
 PlayerProfileStore --> AnalysisResult : принимает
 Request --> TelemetryData : содержит payload
+
+AntiCheatHandler ..|> RequestHandler : реализует
+AntiCheatHandler --> TelemetryAnalyzer : использует
+AntiCheatHandler --> PlayerProfileStore : сохраняет результат
 
 @enduml
