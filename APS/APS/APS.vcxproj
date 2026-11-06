@@ -123,12 +123,29 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="anticheat\PlayerProfile.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="SimulationEngine.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="primitives.hpp" />
+    <ClInclude Include="anticheat\ACAnalysisResult.hpp" />
+    <ClInclude Include="anticheat\ACContext.hpp" />
+    <ClInclude Include="anticheat\PlayerProfile.hpp" />
+    <ClInclude Include="anticheat\PlayerState.h" />
+    <ClInclude Include="anticheat\TelemetryData.hpp" />
+    <ClInclude Include="anticheat\TelemetryEmulator.hpp" />
+    <ClInclude Include="BaseAnalysisResult.hpp" />
+    <ClInclude Include="Emulator.hpp" />
+    <ClInclude Include="EmulatorContext.hpp" />
+    <ClInclude Include="Event.hpp" />
+    <ClInclude Include="Logger\LogSystem.hpp" />
+    <ClInclude Include="Logger\LogType.hpp" />
+    <ClInclude Include="Payload.hpp" />
+    <ClInclude Include="Primitives.hpp" />
+    <ClInclude Include="Request.hpp" />
+    <ClInclude Include="RingBuffer.hpp" />
     <ClInclude Include="SimulationEngine.h" />
+    <ClInclude Include="Source.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

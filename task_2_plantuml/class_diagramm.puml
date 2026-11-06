@@ -1,36 +1,34 @@
 @startuml
 skinparam classAttributeIconSize 0
-skinparam monochrome true
+skinparam monochrome false
 
 interface RequestHandler {
   + onServed(req: Request, finishTime: double)
 }
 
-interface Payload {
-  + getPlayerId(): int
+interface Payload #LightGreen {
   + getTimestamp(): double
-  + getMetrics(): Map<String, double>
 }
 
-enum PlayerStatus {
+enum PlayerState #LightGreen {
   NORMAL
   WARNING
   BANNED
 }
 
-class Point3D {
+class Point3D #LightGreen {
   - x: double
   - y: double
   - z: double
 }
 
-class Vector3D {
+class Vector3D #LightGreen {
   - x: double
   - y: double
   - z: double
 }
 
-enum LogType {
+enum LogType #LightGreen {
   EVENT
   GENERATION
   BUFFER_WRITE
@@ -42,7 +40,7 @@ enum LogType {
   STATISTICS
 }
 
-class Logger {
+class Logger #LightGreen {
   - logs: Map<LogType, List<Log>>
   
   + log(type: LogType, log: Log)
@@ -52,7 +50,7 @@ class Logger {
   - toString(type: LogType): String
 }
 
-class Log {
+class Log #LightGreen {
   - date: double
   - logContent: String
   
@@ -63,52 +61,60 @@ class Log {
 Logger --> LogType : использует
 Logger --> Log : использует
 
-SimulationEngine --> Logger : логирует события
-Source --> Logger : логирует генерацию
-Device --> Logger : логирует обслуживание
-DispatcherPlacement --> Logger : логирует отказы
-DispatcherSelection --> Logger : логирует выборку
-EventScheduler --> Logger : логирует планирование
+
 
 TelemetryData --> Point3D : содержит
 TelemetryData --> Vector3D : содержит
-PlayerProfile --> PlayerStatus : использует
+PlayerProfile --> PlayerState : использует
 
-' === БЛОК СОБЫТИЙ (ПОЛИМОРФИЗМ) ===
-rectangle "События системы" #FFEBEE {
-    class Event {
+' === БЛОК СОБЫТИЙ (ПРОСТОЕ НАСЛЕДОВАНИЕ) ===
+rectangle "События системы" {
+
+    enum EventType #LightGreen {
+      SERVICE_END = 0
+      ARRIVAL = 1
+    }
+  
+    class Event #LightGreen {
         <<abstract>>
         # time: double
+
+        # Event(time: double)
         + {abstract} handle(engine: SimulationEngine)
+        + {abstract} getType(): EventType
         + getTime(): double
     }
-    
-    class ArrivalEvent {
-        - sourceId: int
-        - request: Request
+
+    class ArrivalEvent #LightGreen {
+        - request: unique_ptr<Request>
         + handle(engine: SimulationEngine)
+        + getType(): EventType
+        + getRequest(): unique_ptr<Request>
     }
-    
-    class ServiceEndEvent {
+
+    class ServiceEndEvent #LightGreen {
         - deviceId: int
         + handle(engine: SimulationEngine)
+        + getType(): EventType
+        + getDeviceId(): int
     }
-    
-    class ScheduleNextEvent {
-        - sourceId: int
-        + handle(engine: SimulationEngine)
-    }
-    
 }
 
 Event <|-- ArrivalEvent
 Event <|-- ServiceEndEvent
-Event <|-- ScheduleNextEvent
 
+Event --> EventType : использует
 Event ..> SimulationEngine : использует
+ArrivalEvent --> Request : владеет (unique_ptr)
 
 note top of Event
-Виртуальная база для всех видов событий
+  Виртуальная база для всех видов событий.
+  Хранит время для сортировки в priority_queue.
+end note
+
+note top of EventType
+  Константы имеют смысл при совпадении времени:
+  SERVICE_END (0) обрабатывается раньше ARRIVAL (1).
 end note
 
 note bottom of ArrivalEvent
@@ -121,12 +127,6 @@ note bottom of ServiceEndEvent
   **Архитектурный триггер**
   ВХОДИТ в sequence diagramm
   Будит Диспетчера Выбора (ДВ)
-end note
-
-note bottom of ScheduleNextEvent
-  **Служебное событие**
-  НЕ входит в sequence diagramm
-  Планирование следующей генерации (внутри Source)
 end note
 
 class SimulationEngine {
@@ -148,25 +148,63 @@ class SimulationEngine {
   + runSimulation()
 }
 
+
+interface Emulator #LightGreen {
+  + emulate(playerId: int, cheatLevel: double, currentTime: double): Payload
+}
+
+class TelemetryEmulator #LightGreen {
+  + emulate(playerId: int, cheatLevel: double, currentTime: double): Payload
+}
+
+TelemetryEmulator ..|> Emulator : реализует
+
+note bottom of TelemetryEmulator
+  Stateless-сервис.
+  Не хранит состояние игрока,
+  интерпретирует cheatLevel из аргументов.
+end note
+
+class EmulatorContext #LightGreen {
+  <<abstract>>
+}
+
+class ACContext #LightGreen {
+  - playerId: int
+  - cheatLevel: double
+  - currentTime: double
+  
+  + getPlayerId(): int
+  + getCheatLevel(): double
+  + getCurrentTime(): double
+}
+
+EmulatorContext <|-- ACContext
+
+
+Source --> EmulatorContext : хранит ссылку
+
 class Source {
   - scheduler: EventScheduler
   - logger: Logger
+  - emulator: Emulator
+  - context: EmulatorContext
 
   - id: int
   - lambda: double ' Параметр для ИЗ1
   
-  + generateRequest(): Request ' Генерация по ИЗ1
-  + scheduleNextRequest(): double ' просто время след. запуска
+  + generateRequest(currentTime: double): Request ' Генерация по ИЗ1 и через Emulator
+  + generateNextInterval(currentTime: double): double ' просто время след. запуска
 }
 
-class Request {
+Source --> Emulator : использует
+
+class Request #LightGreen {
   - id: int
   - sourceId: int
   - generationTime: double
-  - arrivalTime: double
-  - payload: Payload 
+  - payload: std::unique_ptr<Payload>
   
-  + operator<(other: Request): boolean
   + getAge(currentTime): double
   + getPayload(): Payload
 }
@@ -174,12 +212,9 @@ class Request {
 note left of Request
 Основная структура-обертка, которая 
 будет проходить цикл обработки
-Реализует оператор <
-по generationTime
-для использования в RingBuffer<Request>
 end note
 
-class TelemetryData {
+class TelemetryData #LightGreen {
   - playerId: int
   - tickTimestamp: double
   - positionSamples: List<Point3D>
@@ -187,8 +222,9 @@ class TelemetryData {
   - maxSpeed100ms: double
   - aimJitterScore: double
   
-  + getPlayerId(): int
   + getTimestamp(): double
+
+  + getPlayerId(): int
   + getMetrics(): Map<String, double>
 }
 
@@ -196,52 +232,60 @@ TelemetryData ..|> Payload : реализует
 
 class TelemetryAnalyzer {
   - threshold: double
-  + analyze(data: TelemetryData): AnalysisResult
+  + analyze(data: TelemetryData): ACAnalysisResult
 }
 
-class AnalysisResult {
+interface BaseAnalysisResult #LightGreen {
+  + getTimestamp(): double
+}
+
+class ACAnalysisResult #LightGreen {
   - playerId: int
-  - suspicionScore: double ' От 0.0 до 1.0 (насколько тик был подозрителен)
+  - suspicionScore: double ' От 0.0 до 1.0
   - reason: String
   - timestamp: double
+  
+  + getPlayerId(): int
+  + getSuspicionScore(): double
+  + getReason(): String
+  + getTimestamp(): double
 }
-note left of AnalysisResult
 
-end note
+BaseAnalysisResult <|.. ACAnalysisResult : реализует
 
 class PlayerProfile {
   - playerId: int
-  - playerStatus : PlayerStatus
+  - PlayerState : PlayerState
   - sessionStartTime: double
   - currentSuspicionScore: double ' Накопленный счетчик
   - static banThreshold: double ' Порог для бана, например, 0.95
   - static warningThreshold: double ' Порог для варна/мутa
   
   - decayScore(timePassed: double) ' Старые подозрения со временем затухают
-  + addResult(result: AnalysisResult)
-  + getStatus(): PlayerStatus ' NORMAL, WARNING, BANNED
+  + mergeResult(result: ACAnalysisResult)
+  + getStatus(): PlayerState ' NORMAL, WARNING, BANNED
 }
 
 class PlayerProfileStore {
  - profiles: Map<int, PlayerProfile>  ' Map<int, PlayerProfile> 
   
   + getOrCreateProfile(playerId: int): PlayerProfile
-  + processResult(result: AnalysisResult)
+  + processResult(result: ACAnalysisResult)
   + getStatistics()
 }
 
 
-class RingBuffer {
+class RingBuffer #LightGreen {
   - capacity: int
-  - slots: List<Request>
+  - slots: List<unique_ptr<Request>>
   - writePointer: int
   - readPointer: int
   - count: int
   
   + isFull(): boolean
   + isEmpty(): boolean
-  + write(req: Request): Request
-  + readNext(): Request
+  + write(req: unique_ptr<Request>): unique_ptr<Request>
+  + readNext(): std::unique_ptr<Request>
   + findOldest(): Request
 }
 
@@ -315,7 +359,7 @@ note top of AntiCheatHandler
 end note
 
 class EventScheduler {
-  - eventQueue: PriorityQueue<Event>
+  - eventQueue: priority_queue<unique_ptr<Event>>
   - logger: Logger
 
   + schedule(event: Event)
@@ -341,9 +385,9 @@ DispatcherSelection --> RingBuffer : забирает
 DispatcherSelection --> Device : назначает
 
 
-TelemetryAnalyzer ..> AnalysisResult : возвращает
+TelemetryAnalyzer ..> ACAnalysisResult : возвращает
 PlayerProfileStore "1" *-- "*" PlayerProfile : хранит
-PlayerProfileStore --> AnalysisResult : принимает
+PlayerProfileStore --> ACAnalysisResult : принимает
 Request --> Payload : содержит payload
 
 AntiCheatHandler ..|> RequestHandler : реализует
